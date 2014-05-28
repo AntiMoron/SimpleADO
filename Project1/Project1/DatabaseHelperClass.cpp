@@ -20,26 +20,25 @@ bool DatabaseHelperClass::Initialize()
 	HRESULT hr = S_OK;
 	CoInitialize(nullptr);
 	try{
-		m_connection = nullptr;
-		hr = m_connection.CreateInstance(__uuidof(ADODB::Connection));
+		m_connection.CreateInstance(__uuidof(ADODB::Connection));
+		m_pCommand.CreateInstance(__uuidof(ADODB::Command));
 	}
 	catch (_com_error &ex)
 	{
 		MessageBox(NULL, ex.ErrorMessage(), L"error", MB_OK);
 		return false;
 	}
-	if(FAILED(hr)) return false;
-	_bstr_t ConnectionStr = "Driver={sql server};server=127.0.0.1;database=MyAI";
+	_bstr_t ConnectionStr = "Driver={sql server};server=127.0.0.1;database=ks";
 	try
 	{
-		m_connection->Open(ConnectionStr,"sa","123",NULL);
+		m_connection->Open(ConnectionStr, "sa", "123", NULL);
+		m_pCommand->ActiveConnection = m_connection;
 	}
 	catch (_com_error &ex)
 	{
 		MessageBox(NULL, ex.ErrorMessage(), L"error", MB_OK);
 		return false;
 	}
-	hr = m_recordset.CreateInstance(__uuidof(ADODB::Recordset));
 	if (FAILED(hr)) return false;
 	return true;
 };
@@ -49,16 +48,18 @@ bool DatabaseHelperClass::Shutdown()
 	return false;
 }
 
-bool DatabaseHelperClass::ExecuteSQL(char* sqlstr)
+bool DatabaseHelperClass::ExecuteSQL(const char* sqlstr)
 {
 	HRESULT hr;
 	try
 	{
-		m_recordset->Open((_variant_t)sqlstr,m_connection.GetInterfacePtr()
+		m_pCommand->CommandText = sqlstr;
+		m_recordset = m_pCommand->Execute(NULL,NULL,ADODB::adCmdText);
+/*		m_recordset->Open((_variant_t)sqlstr,m_connection.GetInterfacePtr()
 			,ADODB::adOpenDynamic,
 			ADODB::adLockOptimistic,
 			ADODB::adCmdText);
-		m_recordset->MoveFirst();
+*/		m_recordset->MoveFirst();
 	}
 	catch (_com_error &ex)
 	{
@@ -67,25 +68,6 @@ bool DatabaseHelperClass::ExecuteSQL(char* sqlstr)
 	return true;
 }
 
-bool DatabaseHelperClass::ExecuteSQL(string sqlstr)
-{
-	HRESULT hr;
-	try
-	{
-		m_recordset->Open((_variant_t)sqlstr.c_str(), m_connection.GetInterfacePtr()
-			, ADODB::adOpenDynamic,
-			ADODB::adLockOptimistic,
-			ADODB::adCmdText);
-		m_recordset->MoveFirst();
-	}
-	catch (_com_error &ex)
-	{
-		printf("%X\n", m_recordset);
-		MessageBox(NULL, ex.ErrorMessage(), L"error", MB_OK);
-		return false;
-	}
-	return true;
-}
 
 
 ADODB::_RecordsetPtr& DatabaseHelperClass::GetResult()
@@ -93,33 +75,55 @@ ADODB::_RecordsetPtr& DatabaseHelperClass::GetResult()
 	return m_recordset;
 }
 
-
-bool DatabaseHelperClass::hasNext()
-{
-	return m_recordset->adoEOF == VARIANT_FALSE;
-}
-
 bool DatabaseHelperClass::next()
 {
 	HRESULT hr;
-	hr = m_recordset->MoveNext();
-	if (FAILED(hr))
+	try
+	{
+		hr = m_recordset->MoveNext();
+		if (FAILED(hr))
+			return false;
+	}
+	catch (_com_error ex)
+	{
 		return false;
-	return true;
+	}
+	return false;
 }
 
 bool DatabaseHelperClass::MoveFirst()
 {
 	HRESULT hr = S_OK;
-	hr = m_recordset->MoveFirst();
-	if (FAILED(hr)) return false;
+	try
+	{
+		hr = m_recordset->MoveFirst();
+	}
+	catch (_com_error e)
+	{
+		MessageBox(NULL,e.ErrorMessage(),L"Error",MB_OK);
+		return false;
+	}
 	return true;
 }
 
 const string DatabaseHelperClass::operator[](char* str)const
 {
-	string ret = (char*)(_bstr_t)(m_recordset->Fields->GetItem(_variant_t(str))->Value);
+	_variant_t var = m_recordset->GetCollect(str);
+	string ret = (_bstr_t) var;
 	return 	ret;
+}
+
+bool DatabaseHelperClass::hasNext()
+{
+	try
+	{
+		return !m_recordset->adoEOF;
+	}
+	catch (_com_error ee)
+	{
+		return false;
+	}
+	return false;
 }
 
 bool DatabaseHelperClass::Insert(string tablename,int vNum,...)
@@ -127,7 +131,7 @@ bool DatabaseHelperClass::Insert(string tablename,int vNum,...)
 	try
 	{
 		string SQLstr = "select * from " + tablename + " ";
-		ExecuteSQL(SQLstr);
+		ExecuteSQL(SQLstr.c_str());
 		va_list lst;
 		va_start(lst, vNum);
 		m_recordset->AddNew();
